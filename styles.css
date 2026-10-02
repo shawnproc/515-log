@@ -169,3 +169,7 @@ input:focus,select:focus,textarea:focus{border-color:#2C333C;background:#0B0D10}
 button.wd{font:inherit;color:inherit;cursor:pointer}
 button.wd:hover{border-color:var(--ink2)}
 input[type=date]{min-height:38px;color-scheme:dark}
+
+/* logo = home button */
+button.mark{background:none;border:0;padding:4px 6px 4px 0;margin:-4px 0;color:var(--ink);cursor:pointer;-webkit-tap-highlight-color:transparent}
+button.mark:active{transform:scale(.96)}

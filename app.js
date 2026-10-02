@@ -862,6 +862,12 @@ document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () =>
 $("#prev").addEventListener("click", () => { cur = addDays(cur, -1); render(); });
 $("#next").addEventListener("click", () => { cur = addDays(cur, 1); render(); });
 $("#todaybtn").addEventListener("click", () => { cur = todayISO(); render(); });
+$("#home").addEventListener("click", () => {
+  if (!$("#scanwrap").hidden) stopScan();
+  cur = todayISO(); tab = "train"; lsSet("515.tab", tab);
+  ui.food.pick = null; ui.food.err = ""; ui.bf.msg = "";
+  render(); window.scrollTo({ top: 0, behavior: "smooth" });
+});
 const tip = $("#tip");
 document.addEventListener("pointerover", e => { const t = e.target.closest && e.target.closest("[data-tip]"); if (!t) { tip.hidden = true; return; } tip.textContent = t.getAttribute("data-tip"); tip.hidden = false; });
 document.addEventListener("pointermove", e => { if (tip.hidden) return; const x = Math.min(window.innerWidth - tip.offsetWidth - 8, e.clientX + 12); tip.style.left = Math.max(8, x) + "px"; tip.style.top = (e.clientY - 34) + "px"; });
