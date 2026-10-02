@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://world.openfoodfacts.org https://api.nal.usda.gov; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#ECEEF1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101318" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="5:15">
+<title>The 5:15 Log</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="top"><div class="wrap" style="padding-block:0">
+  <div class="brandrow">
+    <div class="mark">5<span>:</span>15</div>
+    <div class="save" id="save" aria-live="polite">Loading…</div>
+  </div>
+  <div class="datenav">
+    <button class="iconbtn" id="prev" aria-label="Previous day">‹</button>
+    <div class="d" id="datelabel"></div>
+    <button class="iconbtn" id="next" aria-label="Next day">›</button>
+    <button class="btn small" id="todaybtn">Today</button>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="train" id="tab-train">Train</button>
+    <button class="tab" role="tab" data-tab="fuel" id="tab-fuel">Fuel</button>
+    <button class="tab" role="tab" data-tab="progress" id="tab-progress">Progress</button>
+    <button class="tab" role="tab" data-tab="plan" id="tab-plan">Plan</button>
+  </div>
+</div></div>
+<main class="wrap" id="main"></main>
+<div class="tip" id="tip" hidden></div>
+
+<div id="scanwrap" class="scanwrap" role="dialog" aria-modal="true" aria-label="Scan a barcode" hidden>
+  <div class="scanbar"><span class="label">Scan barcode</span><button class="btn small" id="scanclose">Cancel</button></div>
+  <div id="reader" class="reader"></div>
+  <div id="scanmsg" class="scanmsg"></div>
+</div>
+
+<div id="update" class="update" role="status" hidden>
+  <span>A new version is ready.</span>
+  <button class="btn small primary" id="updatebtn">Update</button>
+</div>
+
+<noscript><p class="wrap">The 5:15 Log needs JavaScript turned on.</p></noscript>
+<script src="app.js"></script>
+</body>
+</html>
