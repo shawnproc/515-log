@@ -1,6 +1,6 @@
 /* The 5:15 Log service worker: app shell cached for offline use.
    Bump VERSION on every release so phones pick up the update. */
-const VERSION = "515-v1";
+const VERSION = "515-v2";
 const FONT_CACHE = "515-fonts";
 const SHELL = [
   "./", "index.html", "styles.css", "app.js", "manifest.webmanifest",

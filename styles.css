@@ -1,28 +1,22 @@
 /* base reset (standalone page) */
-html{-webkit-text-size-adjust:100%;color-scheme:light}
+html{-webkit-text-size-adjust:100%;color-scheme:dark}
 body{margin:0;min-height:100%;padding-bottom:env(safe-area-inset-bottom,0px);-webkit-tap-highlight-color:transparent}
 img{max-width:100%}
 [hidden]{display:none!important}
 input,select,textarea{font-size:16px} /* 16px stops iOS zooming on focus */
 
-/* Layout: one 720px training-log column; sticky date + tab rail; cards only where a thing is a discrete object (an exercise, a meal). */
+/* Layout: one 720px training-log column; sticky date + tab rail; cards only where a thing is a discrete object (an exercise, a meal).
+   Single dark theme: iron-black ground, chalk text, bumper-plate accents. */
 :root{
-  --bg:#ECEEF1; --surface:#FFFFFF; --sunk:#F4F5F7; --ink:#14181D; --ink2:#47505B; --muted:#77818C; --line:#D6DADF;
-  --red:#C8202B; --blue:#1E5DBA; --yellow:#B98A00; --green:#23804F; --onaccent:#FFFFFF;
-  --redsoft:#F8E3E4; --greensoft:#E0F1E7;
+  --bg:#060708; --surface:#0E1013; --sunk:#090A0C; --ink:#E4E6E9; --ink2:#9CA3AC; --muted:#666E78; --line:#1B1F25;
+  --red:#FF3B45; --blue:#4C8DFF; --yellow:#F2BC26; --green:#34D27F; --onaccent:#060708;
+  --redsoft:#24090C; --greensoft:#0A2015; --glow:rgba(255,59,69,.16);
   --display:"Big Shoulders Display","Arial Narrow",Impact,sans-serif;
   --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
   --r:10px;
+  color-scheme:dark;
 }
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#101318; --surface:#191D24; --sunk:#14181E; --ink:#E9EBEE; --ink2:#AEB5BE; --muted:#808A95; --line:#2A3039;
-  --red:#FF5C62; --blue:#5E9DFF; --yellow:#F0C232; --green:#4CC787; --onaccent:#14181D;
-  --redsoft:#3A1C20; --greensoft:#143022; color-scheme:dark }}
-:root[data-theme="dark"]{
-  --bg:#101318; --surface:#191D24; --sunk:#14181E; --ink:#E9EBEE; --ink2:#AEB5BE; --muted:#808A95; --line:#2A3039;
-  --red:#FF5C62; --blue:#5E9DFF; --yellow:#F0C232; --green:#4CC787; --onaccent:#14181D;
-  --redsoft:#3A1C20; --greensoft:#143022; color-scheme:dark }
 
 html,body{background:var(--bg);color:var(--ink)}
 body{font-family:var(--body);font-size:15px;line-height:1.5}
@@ -159,3 +153,12 @@ details summary{cursor:pointer;font-size:13px}
 .update{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:25;max-width:560px;margin:0 auto;display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--ink);color:var(--bg);border-radius:10px;padding:10px 12px}
 input[type=search]{-webkit-appearance:none;appearance:none}
 .scanbtn{width:100%;padding-block:12px;font-size:16px}
+
+/* dark-theme polish */
+.top{background:rgba(6,7,8,.92);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.mark span{text-shadow:0 0 18px var(--glow)}
+.tab[aria-selected="true"]{box-shadow:0 6px 14px -10px var(--red)}
+.btn.primary{box-shadow:0 4px 18px -6px var(--glow)}
+.card,.ex{background:linear-gradient(180deg,#101317,var(--surface))}
+input:focus,select:focus,textarea:focus{border-color:#2C333C;background:#0B0D10}
+::selection{background:var(--red);color:var(--onaccent)}
