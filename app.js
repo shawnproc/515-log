@@ -72,7 +72,7 @@ let profile = clone(DEFAULT_PROFILE);
 let days = {};                 // date -> day doc
 let cur = todayISO();
 let tab = ["train","fuel","progress","plan"].includes(lsGet("515.tab")) ? lsGet("515.tab") : "train";
-const ui = { lift: lsGet("515.lift") || "", draft: { name: "", kcal: "", p: "", c: "", f: "", fav: false }, importMsg: "",
+const ui = { bf: { date: "", bw: "", ex: "", w: "", r: "", s: "1", msg: "" }, lift: lsGet("515.lift") || "", draft: { name: "", kcal: "", p: "", c: "", f: "", fav: false }, importMsg: "",
   food: { q: "", results: [], busy: false, err: "", pick: null, amt: "", unit: "g", fav: false, scanning: false, code: "" }, keyMsg: "" };
 
 function mergeProfile(remote) {
@@ -171,7 +171,10 @@ function render() {
   const d = parse(cur), t = todayISO();
   $("#datelabel").replaceChildren(
     h("span", { text: cur === t ? "Today" : WDL[d.getDay()] }),
-    h("small", { text: `${WDL[d.getDay()]}, ${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}` })
+    h("small", { text: `${WDL[d.getDay()]}, ${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}` }),
+    h("input", { type: "date", class: "datejump", "aria-label": "Jump to a date", value: cur, max: t,
+      onclick: e => { try { e.target.showPicker && e.target.showPicker(); } catch {} },
+      onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) { cur = e.target.value; render(); } } })
   );
   document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === tab)));
   const main = $("#main");
@@ -344,6 +347,67 @@ function viewFuel() {
 }
 
 /* ---------- PROGRESS ---------- */
+/* ---------- backfill: add past entries without paging day by day ---------- */
+function backfillCard() {
+  const B = ui.bf, t = todayISO();
+  if (!B.date) B.date = addDays(t, -1);
+  const dd = getDay(B.date), st = dd.workout?.status;
+  const num = (id, key, ph, mode, w) => h("input", { id, type: "text", inputmode: mode || "decimal", placeholder: ph, value: B[key], style: `width:${w || 80}px;font-family:var(--mono);text-align:center`,
+    oninput: e => { B[key] = e.target.value.replace(/[^\d.]/g, "").slice(0, 6); e.target.value = B[key]; } });
+  const logged = (dd.workout?.exercises || []).map(e => ({ n: e.n, sets: e.sets.filter(filled) })).filter(e => e.sets.length);
+
+  const addBw = () => {
+    const v = n0(B.bw); if (!(v > 40 && v < 800)) { B.msg = "Enter a bodyweight first."; render(); return; }
+    mutDay(B.date, d => d.bw = String(v), false);
+    B.msg = `Bodyweight ${v} ${profile.unit} saved for ${nice(B.date)}.`; B.bw = ""; render();
+  };
+  const addLift = () => {
+    const name = B.ex.trim().slice(0, 60), w = n0(B.w), r = Math.round(n0(B.r)), sets = Math.min(12, Math.max(1, Math.round(n0(B.s) || 1)));
+    if (!name || !(w >= 0) || !(r > 0) || B.w === "") { B.msg = "Enter the exercise, weight and reps."; render(); return; }
+    mutDay(B.date, d => {
+      d.workout.rest = false;
+      let ex = d.workout.exercises.find(e => keyOf(e.n) === keyOf(name));
+      if (!ex) { ex = { n: name, ts: sets, tr: r, sets: [] }; d.workout.exercises.push(ex); }
+      let left = sets;
+      for (const s2 of ex.sets) { if (!left) break; if (!filled(s2)) { s2.w = String(w); s2.r = String(r); s2.d = true; left--; } }
+      while (left-- > 0) ex.sets.push({ w: String(w), r: String(r), d: true });
+      if (d.workout.status !== "done") d.workout.status = "done";
+    }, false);
+    B.msg = `Added ${name} ${w}×${r}${sets > 1 ? ` for ${sets} sets` : ""} to ${nice(B.date)}. That session now counts as done.`;
+    B.w = ""; B.r = ""; B.s = "1"; render();
+  };
+  const setStatus = s => { mutDay(B.date, d => d.workout.status = s, false); B.msg = `${nice(B.date)} marked ${s === "done" ? "done" : s === "skipped" ? "skipped" : "open"}.`; render(); };
+
+  return h("section", { class: "stack" },
+    h("h3", { text: "Add a past entry" }),
+    h("div", { class: "card stack" },
+      h("div", { class: "row" },
+        h("label", { class: "fieldl", style: "flex:1;min-width:150px" }, h("span", { text: "Date" }),
+          h("input", { id: "bf-date", type: "date", value: B.date, max: t, onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) { B.date = e.target.value; B.msg = ""; render(); } } })),
+        h("div", { class: "sub", style: "font-size:13px;align-self:flex-end;padding-bottom:6px", text: `${WDL[parse(B.date).getDay()]} · ${dd.workout?.rest && !dd.workout.exercises.length ? "rest day" : (dd.workout?.name || "session")}${st && st !== "open" ? " · " + st : ""}${dd.bw ? ` · ${dd.bw} ${profile.unit}` : ""}` })),
+
+      h("div", { class: "label", text: "Bodyweight" }),
+      h("div", { class: "row" }, num("bf-bw", "bw", profile.unit, "decimal", 100), h("button", { class: "btn", text: "Save weight", onclick: addBw })),
+
+      h("div", { class: "label", style: "margin-top:4px", text: "Lift" }),
+      h("input", { id: "bf-ex", type: "text", list: "bflist", autocomplete: "off", placeholder: "Exercise, e.g. Bench Press", value: B.ex, oninput: e => B.ex = e.target.value.slice(0, 60) }),
+      h("datalist", { id: "bflist" }, knownExercises().map(n => h("option", { value: n }))),
+      h("div", { class: "row" },
+        h("label", { class: "fieldl" }, h("span", { text: profile.unit }), num("bf-w", "w", "225")),
+        h("label", { class: "fieldl" }, h("span", { text: "Reps" }), num("bf-r", "r", "6", "numeric", 64)),
+        h("label", { class: "fieldl" }, h("span", { text: "Sets" }), num("bf-s", "s", "1", "numeric", 56)),
+        h("button", { class: "btn primary", style: "align-self:flex-end", text: "Add lift", onclick: addLift })),
+
+      logged.length ? h("div", { class: "mono sub", style: "font-size:12.5px", text: logged.map(e => `${e.n}: ${e.sets.map(s2 => s2.w + "×" + s2.r).join(", ")}`).join("  ·  ") }) : null,
+
+      h("div", { class: "row" },
+        st !== "done" ? h("button", { class: "btn small", text: "Mark session done", onclick: () => setStatus("done") }) : h("button", { class: "btn small", text: "Undo done", onclick: () => setStatus("open") }),
+        st !== "skipped" && st !== "done" ? h("button", { class: "btn small ghost", text: "Mark skipped", onclick: () => setStatus("skipped") }) : null,
+        h("button", { class: "btn small ghost", text: "Open full day →", onclick: () => { cur = B.date; tab = "train"; lsSet("515.tab", tab); render(); window.scrollTo(0, 0); } })),
+      B.msg ? h("div", { class: "notice", text: B.msg }) : null,
+      h("div", { class: "muted", style: "font-size:12px", text: "For meals on a past day, use Open full day, then the Fuel tab." })));
+}
+
 function weekInfo() {
   const mon = mondayOf(cur), t = todayISO();
   const cells = [];
@@ -371,9 +435,11 @@ function viewProgress() {
   out.push(h("section", {},
     h("div", { class: "label", text: `Week of ${nice(mondayOf(cur))}` }),
     h("h2", { text: `${wk.done} of ${wk.planned} sessions` }),
-    h("div", { class: "week" }, wk.cells.map(c => h("div", { class: "wd " + c.cls, title: c.date }, h("div", { class: "l", text: c.wd }), h("div", { class: "s", text: c.sym })))),
+    h("div", { class: "week" }, wk.cells.map(c => h("button", { class: "wd " + c.cls, "aria-label": `Open ${WDL[parse(c.date).getDay()]} ${nice(c.date)}`, onclick: () => { cur = c.date; tab = "train"; lsSet("515.tab", tab); render(); window.scrollTo(0, 0); } }, h("div", { class: "l", text: c.wd }), h("div", { class: "s", text: c.sym })))),
+    h("div", { class: "muted", style: "font-size:12px;margin-top:6px", text: "Tap a day to open and edit it." }),
     h("div", { class: wk.missed > 2 && !profile.vacation ? "notice" : "sub", style: "margin-top:10px" + (wk.missed > 2 && !profile.vacation ? ";border-color:var(--red);color:var(--ink)" : ""), text: verdict })
   ));
+  out.push(backfillCard());
 
   // bodyweight
   const W = chartWidth();
