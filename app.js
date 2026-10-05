@@ -90,7 +90,7 @@ function blankDay(date) {
     kind: "day", date, bw: "", notes: "", meals: [],
     workout: {
       name: sp.name, rest: !!sp.rest && !(sp.ex || []).length, status: "open",
-      exercises: (sp.ex || []).map(e => ({ n: e.n, ts: e.s, tr: e.r, sets: Array.from({ length: Math.max(1, e.s | 0) }, () => ({ w: "", r: "", d: false })) }))
+      exercises: (sp.ex || []).filter(e => e.n).map(e => ({ n: e.n, ts: e.s, tr: e.r, sets: prefillSets(e.n, e.s, e.r, date) }))
     }
   };
 }
@@ -112,7 +112,7 @@ function applyTemplate(date, key) {
     if (key === "rest") { w.name = "Rest"; w.exercises = kept; w.rest = !kept.length; if (!kept.length && w.status === "done") w.status = "open"; return; }
     if (key === "blank") { w.name = "Session"; w.rest = false; w.exercises = kept; w.status = w.status === "skipped" ? "open" : w.status; return; }
     const sp = profile.split[key]; if (!sp) return;
-    const add = (sp.ex || []).filter(e => e.n && !have.has(keyOf(e.n))).map(e => ({ n: e.n, ts: e.s, tr: e.r, sets: Array.from({ length: Math.max(1, e.s | 0) }, () => ({ w: "", r: "", d: false })) }));
+    const add = (sp.ex || []).filter(e => e.n && !have.has(keyOf(e.n))).map(e => ({ n: e.n, ts: e.s, tr: e.r, sets: prefillSets(e.n, e.s, e.r, date) }));
     w.exercises = kept.concat(add);
     w.rest = !w.exercises.length;
     w.name = w.rest ? "Rest" : (sp.rest && sp.name === "Rest" ? "Session" : sp.name);
@@ -157,7 +157,16 @@ window.addEventListener("pagehide", persistNow);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") persistNow(); });
 
 /* ---------- training helpers ---------- */
-const filled = st => st.w !== "" && st.r !== "" && st.w != null && st.r != null;
+const hasVals = st => st.w !== "" && st.r !== "" && st.w != null && st.r != null;
+const filled = st => !!st.d && hasVals(st); // logged = has numbers AND ticked done
+// planned sets prefilled with last time's weights and the target reps
+function prefillSets(name, n, tr, date) {
+  const lp = lastPerf(name, date);
+  return Array.from({ length: Math.max(1, n | 0) }, (_, j) => {
+    const ref = lp ? (lp.sets[j] || lp.sets[lp.sets.length - 1]) : null;
+    return { w: ref ? String(ref.w) : "", r: tr ? String(tr) : ref ? String(ref.r) : "", d: false };
+  });
+}
 const e1rm = (w, r) => r <= 0 ? 0 : (r === 1 ? w : w * (1 + r / 30));
 const keyOf = name => String(name || "").trim().toLowerCase();
 const sortedDates = () => Object.keys(days).sort();
@@ -185,7 +194,14 @@ const macroTotals = day => (day.meals || []).reduce((a, m) => ({ kcal: a.kcal + 
 const isTrainingDay = date => { const d = days[date]; return d ? !d.workout?.rest : !profile.split[parse(date).getDay()]?.rest; };
 
 /* ---------- render shell ---------- */
+let rendering = false, renderQueued = false;
 function render() {
+  // re-entrancy guard: removing a focused input fires blur/change, which can ask for another render mid-render
+  if (rendering) { if (!renderQueued) { renderQueued = true; queueMicrotask(() => { renderQueued = false; render(); }); } return; }
+  rendering = true;
+  try { renderNow(); } finally { rendering = false; }
+}
+function renderNow() {
   // keep focus + caret across re-renders
   const a = document.activeElement, fid = a && a.id && $("#main").contains(a) ? a.id : null;
   let sel = null; try { if (fid && a.selectionStart != null) sel = [a.selectionStart, a.selectionEnd]; } catch {}
@@ -250,6 +266,7 @@ function viewTrain() {
     )));
   }
 
+  if (w.exercises.length) out.push(h("div", { class: "muted", style: "font-size:12.5px;margin-top:10px", text: "Dim numbers are prefilled from last time and your plan. Edit anything, then tick ✓ when the set is done. Only ticked sets count." }));
   const list = h("section", { class: "stack" });
   w.exercises.forEach((ex, i) => list.append(exerciseCard(ex, i, unit)));
   if (w.exercises.length) out.push(list);
@@ -260,7 +277,7 @@ function viewTrain() {
   const add = () => {
     const name = addIn.value.trim().slice(0, 60); if (!name) return;
     const lp = lastPerf(name, cur);
-    mutDay(cur, dd => { dd.workout.rest = false; dd.workout.exercises.push({ n: name, ts: lp ? lp.sets.length : 3, tr: lp ? (lp.tr || 8) : 8, sets: Array.from({ length: lp ? lp.sets.length : 3 }, () => ({ w: "", r: "", d: false })) }); });
+    mutDay(cur, dd => { dd.workout.rest = false; const ts = lp ? lp.sets.length : 3, tr = lp ? (lp.tr || n0(lp.sets[0].r) || 8) : 8; dd.workout.exercises.push({ n: name, ts, tr, sets: prefillSets(name, ts, tr, cur) }); });
   };
   addIn.addEventListener("keydown", e => { if (e.key === "Enter") add(); });
   out.push(h("section", {}, h("div", { class: "row" }, h("div", { style: "flex:1;min-width:160px" }, addIn, dl), h("button", { class: "btn", onclick: add, text: "Add" }))));
@@ -298,26 +315,48 @@ function exerciseCard(ex, i, unit) {
     const prev = lp && lp.sets[j];
     const upd = (field) => e => {
       const val = e.target.value.replace(/[^\d.]/g, "").slice(0, 6);
-      mutDay(cur, dd => { const s2 = dd.workout.exercises[i].sets[j]; s2[field] = val; if (filled(s2) && !s2.touched) s2.d = true; }, false);
-      const box = document.getElementById(`d-${i}-${j}`); if (box) box.checked = !!getDay(cur).workout.exercises[i].sets[j].d;
+      mutDay(cur, dd => { const s2 = dd.workout.exercises[i].sets[j]; s2[field] = val; if (hasVals(s2) && !s2.touched) s2.d = true; }, false);
+      const done = !!getDay(cur).workout.exercises[i].sets[j].d, box = document.getElementById(`d-${i}-${j}`); if (box) box.checked = done;
+      for (const k of ["w", "r"]) document.getElementById(`${k}-${i}-${j}`)?.classList.toggle("pre", !done);
     };
     grid.append(
       h("div", { class: "n", text: j + 1 }),
-      h("input", { id: `w-${i}-${j}`, type: "text", inputmode: "decimal", "aria-label": `Set ${j + 1} weight`, placeholder: prev ? String(prev.w) : "", value: st.w, oninput: upd("w") }),
-      h("input", { id: `r-${i}-${j}`, type: "text", inputmode: "numeric", "aria-label": `Set ${j + 1} reps`, placeholder: prev ? String(prev.r) : String(ex.tr || ""), value: st.r, oninput: upd("r") }),
-      h("input", { id: `d-${i}-${j}`, type: "checkbox", "aria-label": `Set ${j + 1} done`, checked: st.d, onchange: e => mutDay(cur, dd => { const s2 = dd.workout.exercises[i].sets[j]; s2.d = e.target.checked; s2.touched = true; }, false) }),
+      h("input", { id: `w-${i}-${j}`, class: st.d ? "" : "pre", type: "text", inputmode: "decimal", "aria-label": `Set ${j + 1} weight`, placeholder: prev ? String(prev.w) : "", value: st.w, oninput: upd("w") }),
+      h("input", { id: `r-${i}-${j}`, class: st.d ? "" : "pre", type: "text", inputmode: "numeric", "aria-label": `Set ${j + 1} reps`, placeholder: prev ? String(prev.r) : String(ex.tr || ""), value: st.r, oninput: upd("r") }),
+      h("input", { id: `d-${i}-${j}`, type: "checkbox", "aria-label": `Set ${j + 1} done`, checked: st.d, onchange: e => { mutDay(cur, dd => { const s2 = dd.workout.exercises[i].sets[j]; s2.d = e.target.checked; s2.touched = true; }, false); for (const k of ["w", "r"]) document.getElementById(`${k}-${i}-${j}`)?.classList.toggle("pre", !e.target.checked); } }),
       h("button", { class: "x", "aria-label": `Remove set ${j + 1}`, text: "×", onclick: () => mutDay(cur, dd => { const arr = dd.workout.exercises[i].sets; if (arr.length > 1) arr.splice(j, 1); }) })
     );
   });
 
+  const setTarget = (ts, tr) => mutDay(cur, dd => {
+    const e = dd.workout.exercises[i];
+    ts = Math.min(12, Math.max(1, Math.round(ts) || e.sets.length)); tr = Math.min(100, Math.max(0, Math.round(tr) || 0));
+    e.ts = ts; if (tr) e.tr = tr;
+    if (tr) for (const s2 of e.sets) if (!s2.d) s2.r = String(tr);            // unticked sets follow the new reps
+    while (e.sets.length < ts) { const add = prefillSets(e.n, 1, e.tr, cur)[0], last = e.sets[e.sets.length - 1]; if (last && last.w !== "") add.w = last.w; e.sets.push(add); }
+    while (e.sets.length > ts && !e.sets[e.sets.length - 1].d) e.sets.pop(); // never drops a ticked set
+  });
+  const tplKey = currentTplKey(getDay(cur)), sp = profile.split[tplKey];
+  const pe = sp ? (sp.ex || []).find(e => keyOf(e.n) === keyOf(ex.n)) : null;
+  const curTs = ex.ts || ex.sets.length, curTr = ex.tr || "";
+  const planDiff = sp && curTr && (!pe || pe.s !== curTs || pe.r !== curTr);
+  const tgt = (id, val, label, fn) => h("input", { id, class: "tgt", type: "text", inputmode: "numeric", "aria-label": label, value: val,
+    onchange: e => fn(n0(e.target.value.replace(/[^\d]/g, ""))), onkeydown: e => { if (e.key === "Enter") e.target.blur(); } });
+
   return h("div", { class: "ex" },
     h("div", { class: "exhead" },
       h("div", { class: "exname", text: ex.n }),
-      h("div", { class: "row", style: "gap:4px;flex-wrap:nowrap" },
-        h("span", { class: "target", text: ex.ts && ex.tr ? `${ex.ts} × ${ex.tr}` : "" }),
+      h("div", { class: "row", style: "gap:4px;flex-wrap:nowrap;align-items:center" },
+        tgt(`ts-${i}`, curTs, `${ex.n} target sets`, v => setTarget(v, n0(curTr))),
+        h("span", { class: "target", text: "×" }),
+        tgt(`tr-${i}`, curTr, `${ex.n} target reps`, v => setTarget(curTs, v)),
         h("button", { class: "x", "aria-label": "Remove " + ex.n, text: "×", onclick: () => mutDay(cur, dd => dd.workout.exercises.splice(i, 1)) }))),
     hint, grid,
-    h("div", { style: "margin-top:8px" }, h("button", { class: "btn small ghost", text: "+ Set", onclick: () => mutDay(cur, dd => { const arr = dd.workout.exercises[i].sets; const last = arr[arr.length - 1]; arr.push({ w: last ? last.w : "", r: "", d: false }); }) }))
+    h("div", { class: "row", style: "margin-top:8px;gap:4px" },
+      h("button", { class: "btn small ghost", text: "+ Set", onclick: () => mutDay(cur, dd => { const e = dd.workout.exercises[i], arr = e.sets, last = arr[arr.length - 1]; arr.push({ w: last ? last.w : "", r: e.tr ? String(e.tr) : (last ? last.r : ""), d: false }); }) }),
+      ex.sets.some(s2 => hasVals(s2) && !s2.d) ? h("button", { class: "btn small ghost", text: "✓ Tick all", onclick: () => mutDay(cur, dd => { for (const s2 of dd.workout.exercises[i].sets) if (hasVals(s2)) { s2.d = true; s2.touched = true; } }) }) : null,
+      planDiff ? h("button", { class: "btn small ghost", style: "margin-left:auto;color:var(--red)", text: pe ? `Save ${curTs}×${curTr} to ${sp.name} plan` : `Add to ${sp.name} plan`,
+        onclick: () => { if (pe) { pe.s = curTs; pe.r = curTr; } else sp.ex.push({ n: ex.n, s: curTs, r: curTr }); scheduleProfileSave(); render(); } }) : null)
   );
 }
 
@@ -405,7 +444,7 @@ function bulkRowsFor(date, tpl) {
     const done = logged ? logged.sets.filter(filled) : [];
     return done.length
       ? { n: e.n, w: String(done[0].w), r: String(done[0].r), s: String(done.length), ps: e.s, pr: e.r }
-      : { n: e.n, w: "", r: String(e.r || ""), s: String(e.s || 3), ps: e.s, pr: e.r };
+      : (lp => ({ n: e.n, w: lp ? String(lp.sets[0].w) : "", r: String(e.r || (lp ? lp.sets[0].r : "") || ""), s: String(e.s || 3), ps: e.s, pr: e.r }))(lastPerf(e.n, date));
   });
   return rows.length ? rows : [{ n: "", w: "", r: "8", s: "3" }];
 }
@@ -453,7 +492,7 @@ function bulkCard(B) {
     h("div", { class: "row" },
       h("button", { class: "btn small ghost", text: "+ Exercise", onclick: () => { B.rows.push({ n: "", w: "", r: "8", s: "3" }); render(); setTimeout(() => document.getElementById(`bk-${B.rows.length - 1}-n`)?.focus(), 0); } }),
       h("button", { class: "btn primary", style: "margin-left:auto", text: "Save whole day", onclick: save })),
-    h("div", { class: "muted", style: "font-size:12px", text: "Grey numbers are last time's weights. Rows left without a weight are skipped. Saving again overwrites those exercises, so fixing a typo is safe." }));
+    h("div", { class: "muted", style: "font-size:12px", text: "Prefilled from your plan and last time's weights. Edit anything, × out what you skipped. Rows without a weight are skipped. Saving again overwrites, so fixing a typo is safe." }));
 }
 
 function backfillCard() {

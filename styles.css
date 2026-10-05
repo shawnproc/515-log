@@ -188,3 +188,8 @@ button.mark:active{transform:scale(.96)}
 .sessbtn .sn{font-family:var(--display);font-weight:800;font-size:20px;text-transform:uppercase;letter-spacing:.02em;line-height:1.1}
 .sessbtn .sd{font-size:12px;color:var(--muted)}
 .sessbtn.ghostb{background:transparent;border-style:dashed}
+
+/* prefilled (not yet ticked) set values + editable target */
+.sets input.pre{color:var(--muted);border-style:dashed}
+.tgt{width:40px!important;padding:4px 2px!important;text-align:center;font-family:var(--mono);font-size:16px!important;background:transparent!important}
+.tgt:focus{background:var(--sunk)!important}
