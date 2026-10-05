@@ -110,7 +110,7 @@ function applyTemplate(date, key) {
     const w = d.workout, kept = w.exercises.filter(e => e.sets.some(filled)), have = new Set(kept.map(e => keyOf(e.n)));
     w.tpl = key;
     if (key === "rest") { w.name = "Rest"; w.exercises = kept; w.rest = !kept.length; if (!kept.length && w.status === "done") w.status = "open"; return; }
-    if (key === "blank") { w.name = "Session"; w.rest = false; w.exercises = kept; return; }
+    if (key === "blank") { w.name = "Session"; w.rest = false; w.exercises = kept; w.status = w.status === "skipped" ? "open" : w.status; return; }
     const sp = profile.split[key]; if (!sp) return;
     const add = (sp.ex || []).filter(e => e.n && !have.has(keyOf(e.n))).map(e => ({ n: e.n, ts: e.s, tr: e.r, sets: Array.from({ length: Math.max(1, e.s | 0) }, () => ({ w: "", r: "", d: false })) }));
     w.exercises = kept.concat(add);
@@ -211,16 +211,17 @@ function render() {
 function viewTrain() {
   const day = getDay(cur), w = day.workout, unit = profile.unit;
   const st = sessionStats(day);
-  const status = w.status === "done" ? h("span", { class: "pill done", text: "Done" }) : w.status === "skipped" ? h("span", { class: "pill skip", text: "Skipped" }) : h("span", { class: "pill", text: w.rest ? "Rest day" : "Open" });
+  const empty = w.rest && !w.exercises.length, chosenRest = empty && w.tpl === "rest";
+  const status = w.status === "done" ? h("span", { class: "pill done", text: "Done" }) : w.status === "skipped" ? h("span", { class: "pill skip", text: "Skipped" }) : h("span", { class: "pill", text: chosenRest ? "Rest day" : empty ? "No session yet" : "Open" });
 
   const head = h("section", {},
     h("div", { class: "dayhead" },
-      h("div", {}, h("div", { class: "label", text: WDL[parse(cur).getDay()] + " session" }), h("h2", { text: w.rest && !w.exercises.length ? "Rest" : (w.name || "Session") })),
+      h("div", {}, h("div", { class: "label", text: WDL[parse(cur).getDay()] + " session" }), h("h2", { text: chosenRest ? "Rest" : empty ? "Pick a session" : (w.name || "Session") })),
       status),
     h("div", { class: "row", style: "margin-top:10px" },
       h("span", { class: "label", text: "Session" }),
       h("select", { id: "tplsel-" + cur, "aria-label": "Session for this day", style: "width:auto;flex:1;max-width:280px", onchange: e => applyTemplate(cur, e.target.value) },
-        sessionOptions().map(([v, l]) => h("option", { value: v, text: l, selected: v === currentTplKey(day) })))),
+        (empty && !chosenRest ? [["", "Choose a session…"]] : []).concat(sessionOptions()).map(([v, l]) => h("option", { value: v, text: l, disabled: v === "", selected: empty && !chosenRest ? v === "" : v === currentTplKey(day) })))),
     h("div", { class: "muted", style: "font-size:12px;margin-top:4px", text: "Switch to any session or a rest day. Sets you've already logged are kept." }),
     w.exercises.length ? h("div", { class: "statline" },
       h("div", { class: "stat" }, h("div", { class: "label", text: "Sets logged" }), h("div", { class: "v", text: st.sets + " / " + w.exercises.reduce((a, e) => a + e.sets.length, 0) })),
@@ -232,9 +233,16 @@ function viewTrain() {
   );
 
   const out = [head];
-  if (w.rest && !w.exercises.length) {
+  if (empty) {
     out.push(h("section", {}, h("div", { class: "card stack" },
-      h("div", { class: "sub", text: "Rest day. To train anyway, pick a session above or add exercises below." }),
+      h("div", { class: "sub", text: chosenRest ? "Marked as a rest day. Changed your mind? Tap a session to load it." : "Tap a session to load its exercises, start a blank one, or mark it a rest day." }),
+      h("div", { class: "sessgrid" },
+        SPLIT_ORDER.filter(k => profile.split[k] && (profile.split[k].ex || []).some(e => e.n)).map(k =>
+          h("button", { class: "sessbtn", onclick: () => applyTemplate(cur, k) },
+            h("span", { class: "sn", text: profile.split[k].name }),
+            h("span", { class: "sd", text: `${WD[+k]} · ${(profile.split[k].ex || []).filter(e => e.n).length} exercises` }))),
+        h("button", { class: "sessbtn", onclick: () => applyTemplate(cur, "blank") }, h("span", { class: "sn", text: "Blank session" }), h("span", { class: "sd", text: "Build it as you go" })),
+        chosenRest ? null : h("button", { class: "sessbtn ghostb", onclick: () => applyTemplate(cur, "rest") }, h("span", { class: "sn", text: "Rest day" }), h("span", { class: "sd", text: "Recovery" }))),
       h("div", { class: "row" },
         h("span", { class: "label", text: "Bodyweight" }),
         h("input", { id: "bw-" + cur, type: "text", inputmode: "decimal", placeholder: unit, value: day.bw || "", style: "width:100px;font-family:var(--mono)",

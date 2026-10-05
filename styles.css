@@ -180,3 +180,11 @@ button.mark:active{transform:scale(.96)}
 .bulk .bkname:focus{background:var(--sunk);border-color:var(--line)}
 .bulk input{font-size:16px;padding-inline:6px}
 .divider{height:1px;background:var(--line);margin-block:6px}
+
+/* session picker on an empty day */
+.sessgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.sessbtn{display:grid;gap:2px;text-align:left;border:1px solid var(--line);background:var(--sunk);border-radius:8px;padding:10px 12px;cursor:pointer;color:var(--ink);font:inherit}
+.sessbtn:hover{border-color:var(--red)}
+.sessbtn .sn{font-family:var(--display);font-weight:800;font-size:20px;text-transform:uppercase;letter-spacing:.02em;line-height:1.1}
+.sessbtn .sd{font-size:12px;color:var(--muted)}
+.sessbtn.ghostb{background:transparent;border-style:dashed}
