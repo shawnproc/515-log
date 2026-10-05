@@ -173,3 +173,10 @@ input[type=date]{min-height:38px;color-scheme:dark}
 /* logo = home button */
 button.mark{background:none;border:0;padding:4px 6px 4px 0;margin:-4px 0;color:var(--ink);cursor:pointer;-webkit-tap-highlight-color:transparent}
 button.mark:active{transform:scale(.96)}
+
+/* bulk day entry */
+.bulk{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) 24px;gap:6px 8px;align-items:center}
+.bulk .bkname{grid-column:1/-1;margin-top:8px;font-weight:600;background:transparent;border-color:transparent;padding-inline:2px}
+.bulk .bkname:focus{background:var(--sunk);border-color:var(--line)}
+.bulk input{font-size:16px;padding-inline:6px}
+.divider{height:1px;background:var(--line);margin-block:6px}

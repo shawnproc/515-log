@@ -72,7 +72,7 @@ let profile = clone(DEFAULT_PROFILE);
 let days = {};                 // date -> day doc
 let cur = todayISO();
 let tab = ["train","fuel","progress","plan"].includes(lsGet("515.tab")) ? lsGet("515.tab") : "train";
-const ui = { bf: { date: "", bw: "", ex: "", w: "", r: "", s: "1", msg: "" }, lift: lsGet("515.lift") || "", draft: { name: "", kcal: "", p: "", c: "", f: "", fav: false }, importMsg: "",
+const ui = { bf: { date: "", bw: "", ex: "", w: "", r: "", s: "1", msg: "", tpl: null, rows: [], rowsKey: "" }, lift: lsGet("515.lift") || "", draft: { name: "", kcal: "", p: "", c: "", f: "", fav: false }, importMsg: "",
   food: { q: "", results: [], busy: false, err: "", pick: null, amt: "", unit: "g", fav: false, scanning: false, code: "" }, keyMsg: "" };
 
 function mergeProfile(remote) {
@@ -348,6 +348,72 @@ function viewFuel() {
 
 /* ---------- PROGRESS ---------- */
 /* ---------- backfill: add past entries without paging day by day ---------- */
+// mode "fill": fill planned empty sets, then append. mode "replace": the exercise's sets become exactly these.
+function writeSets(d, name, w, r, sets, mode, plan) {
+  d.workout.rest = false;
+  let ex = d.workout.exercises.find(e => keyOf(e.n) === keyOf(name));
+  if (!ex) { ex = { n: name, ts: plan ? plan.s : sets, tr: plan ? plan.r : r, sets: [] }; d.workout.exercises.push(ex); }
+  if (mode === "replace") { ex.sets = Array.from({ length: sets }, () => ({ w: String(w), r: String(r), d: true })); return; }
+  let left = sets;
+  for (const s2 of ex.sets) { if (!left) break; if (!filled(s2)) { s2.w = String(w); s2.r = String(r); s2.d = true; left--; } }
+  while (left-- > 0) ex.sets.push({ w: String(w), r: String(r), d: true });
+}
+function bulkRowsFor(date, tpl) {
+  const sp = profile.split[tpl] || { ex: [] };
+  return (sp.ex || []).map(e => {
+    const logged = (getDay(date).workout?.exercises || []).find(x => keyOf(x.n) === keyOf(e.n));
+    const done = logged ? logged.sets.filter(filled) : [];
+    return done.length
+      ? { n: e.n, w: String(done[0].w), r: String(done[0].r), s: String(done.length), ps: e.s, pr: e.r }
+      : { n: e.n, w: "", r: String(e.r || ""), s: String(e.s || 3), ps: e.s, pr: e.r };
+  });
+}
+function bulkCard(B) {
+  const wd = String(parse(B.date).getDay());
+  if (B.tpl == null || !profile.split[B.tpl]) B.tpl = profile.split[wd] && !profile.split[wd].rest ? wd : (Object.keys(profile.split).find(k => !profile.split[k].rest) || wd);
+  const key = B.date + "|" + B.tpl;
+  if (B.rowsKey !== key) { B.rows = bulkRowsFor(B.date, B.tpl); B.rowsKey = key; }
+  const order = ["1", "2", "3", "4", "5", "6", "0"];
+  const cell = (i, k, mode, ph, label) => h("input", { id: `bk-${i}-${k}`, type: "text", inputmode: mode, "aria-label": label, placeholder: ph, value: B.rows[i][k],
+    style: "text-align:center;font-family:var(--mono)", oninput: e => { B.rows[i][k] = e.target.value.replace(/[^\d.]/g, "").slice(0, 6); e.target.value = B.rows[i][k]; } });
+
+  const save = () => {
+    const rows = B.rows.map(r => ({ n: r.n.trim().slice(0, 60), w: r.w, r: Math.round(n0(r.r)), s: Math.min(12, Math.max(1, Math.round(n0(r.s) || 1))), ps: r.ps, pr: r.pr }))
+      .filter(r => r.n && r.w !== "" && r.r > 0);
+    if (!rows.length) { B.msg = "Enter a weight and reps for at least one exercise. Use 0 for bodyweight moves."; render(); return; }
+    const tplName = profile.split[B.tpl]?.name || "Session";
+    mutDay(B.date, d => {
+      d.workout.name = tplName;
+      for (const r of rows) writeSets(d, r.n, n0(r.w), r.r, r.s, "replace", r.ps ? { s: r.ps, r: r.pr } : null);
+      d.workout.status = "done";
+    }, false);
+    const nSets = rows.reduce((a, r) => a + r.s, 0), skipped = B.rows.length - rows.length;
+    B.msg = `Saved ${tplName} for ${nice(B.date)}: ${rows.length} exercise${rows.length === 1 ? "" : "s"}, ${nSets} sets.${skipped ? ` ${skipped} left blank and skipped.` : ""} Session counts as done.`;
+    B.rowsKey = ""; render();
+  };
+
+  return h("div", { class: "stack" },
+    h("div", { class: "spread" },
+      h("div", { class: "label", text: "Whole day" }),
+      h("select", { id: "bk-tpl", "aria-label": "Split day", style: "width:auto", onchange: e => { B.tpl = e.target.value; B.msg = ""; render(); } },
+        order.filter(k => profile.split[k] && !profile.split[k].rest).map(k => h("option", { value: k, text: `${profile.split[k].name} (${WD[+k]})`, selected: k === B.tpl })))),
+    B.rows.length ? h("div", { class: "bulk" },
+      h("span", { class: "label", text: profile.unit }), h("span", { class: "label", text: "Reps" }), h("span", { class: "label", text: "Sets" }), h("span"),
+      B.rows.flatMap((r, i) => {
+        const lp = lastPerf(r.n, B.date);
+        return [
+          h("input", { id: `bk-${i}-n`, class: "bkname", type: "text", list: "bflist", "aria-label": "Exercise", placeholder: "Exercise", value: r.n, oninput: e => B.rows[i].n = e.target.value.slice(0, 60) }),
+          cell(i, "w", "decimal", lp ? String(lp.sets[0].w) : "", `${r.n} weight`),
+          cell(i, "r", "numeric", "", `${r.n} reps`),
+          cell(i, "s", "numeric", "", `${r.n} sets`),
+          h("button", { class: "x", "aria-label": "Remove " + r.n, text: "×", onclick: () => { B.rows.splice(i, 1); render(); } })];
+      })) : h("div", { class: "muted", text: "No exercises in this split day. Add them below or in the Plan tab." }),
+    h("div", { class: "row" },
+      h("button", { class: "btn small ghost", text: "+ Exercise", onclick: () => { B.rows.push({ n: "", w: "", r: "8", s: "3" }); render(); setTimeout(() => document.getElementById(`bk-${B.rows.length - 1}-n`)?.focus(), 0); } }),
+      h("button", { class: "btn primary", style: "margin-left:auto", text: "Save whole day", onclick: save })),
+    h("div", { class: "muted", style: "font-size:12px", text: "Grey numbers are last time's weights. Rows left without a weight are skipped. Saving again overwrites those exercises, so fixing a typo is safe." }));
+}
+
 function backfillCard() {
   const B = ui.bf, t = todayISO();
   if (!B.date) B.date = addDays(t, -1);
@@ -364,15 +430,7 @@ function backfillCard() {
   const addLift = () => {
     const name = B.ex.trim().slice(0, 60), w = n0(B.w), r = Math.round(n0(B.r)), sets = Math.min(12, Math.max(1, Math.round(n0(B.s) || 1)));
     if (!name || !(w >= 0) || !(r > 0) || B.w === "") { B.msg = "Enter the exercise, weight and reps."; render(); return; }
-    mutDay(B.date, d => {
-      d.workout.rest = false;
-      let ex = d.workout.exercises.find(e => keyOf(e.n) === keyOf(name));
-      if (!ex) { ex = { n: name, ts: sets, tr: r, sets: [] }; d.workout.exercises.push(ex); }
-      let left = sets;
-      for (const s2 of ex.sets) { if (!left) break; if (!filled(s2)) { s2.w = String(w); s2.r = String(r); s2.d = true; left--; } }
-      while (left-- > 0) ex.sets.push({ w: String(w), r: String(r), d: true });
-      if (d.workout.status !== "done") d.workout.status = "done";
-    }, false);
+    mutDay(B.date, d => { writeSets(d, name, w, r, sets, "fill"); d.workout.status = "done"; }, false);
     B.msg = `Added ${name} ${w}×${r}${sets > 1 ? ` for ${sets} sets` : ""} to ${nice(B.date)}. That session now counts as done.`;
     B.w = ""; B.r = ""; B.s = "1"; render();
   };
@@ -383,13 +441,16 @@ function backfillCard() {
     h("div", { class: "card stack" },
       h("div", { class: "row" },
         h("label", { class: "fieldl", style: "flex:1;min-width:150px" }, h("span", { text: "Date" }),
-          h("input", { id: "bf-date", type: "date", value: B.date, max: t, onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) { B.date = e.target.value; B.msg = ""; render(); } } })),
+          h("input", { id: "bf-date", type: "date", value: B.date, max: t, onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) { B.date = e.target.value; B.msg = ""; B.tpl = null; B.rowsKey = ""; render(); } } })),
         h("div", { class: "sub", style: "font-size:13px;align-self:flex-end;padding-bottom:6px", text: `${WDL[parse(B.date).getDay()]} · ${dd.workout?.rest && !dd.workout.exercises.length ? "rest day" : (dd.workout?.name || "session")}${st && st !== "open" ? " · " + st : ""}${dd.bw ? ` · ${dd.bw} ${profile.unit}` : ""}` })),
 
       h("div", { class: "label", text: "Bodyweight" }),
       h("div", { class: "row" }, num("bf-bw", "bw", profile.unit, "decimal", 100), h("button", { class: "btn", text: "Save weight", onclick: addBw })),
 
-      h("div", { class: "label", style: "margin-top:4px", text: "Lift" }),
+      h("div", { class: "divider" }),
+      bulkCard(B),
+      h("div", { class: "divider" }),
+      h("div", { class: "label", text: "Single lift" }),
       h("input", { id: "bf-ex", type: "text", list: "bflist", autocomplete: "off", placeholder: "Exercise, e.g. Bench Press", value: B.ex, oninput: e => B.ex = e.target.value.slice(0, 60) }),
       h("datalist", { id: "bflist" }, knownExercises().map(n => h("option", { value: n }))),
       h("div", { class: "row" },
