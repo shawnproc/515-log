@@ -89,12 +89,35 @@ function blankDay(date) {
   return {
     kind: "day", date, bw: "", notes: "", meals: [],
     workout: {
-      name: sp.name, rest: !!sp.rest, status: "open",
+      name: sp.name, rest: !!sp.rest && !(sp.ex || []).length, status: "open",
       exercises: (sp.ex || []).map(e => ({ n: e.n, ts: e.s, tr: e.r, sets: Array.from({ length: Math.max(1, e.s | 0) }, () => ({ w: "", r: "", d: false })) }))
     }
   };
 }
 const getDay = date => days[date] || blankDay(date);
+
+/* any day can run any session: switch templates without losing logged sets */
+const SPLIT_ORDER = ["1", "2", "3", "4", "5", "6", "0"];
+const sessionOptions = () => SPLIT_ORDER.filter(k => profile.split[k]).map(k => [k, `${profile.split[k].name} (${WD[+k]})`]).concat([["rest", "Rest day"], ["blank", "Blank session"]]);
+function currentTplKey(day) {
+  const w = day.workout;
+  if (w.rest && !w.exercises.length) return "rest";
+  if (w.tpl && (w.tpl === "blank" || w.tpl === "rest" || profile.split[w.tpl])) return w.tpl;
+  return SPLIT_ORDER.find(k => profile.split[k] && profile.split[k].name === w.name) || "blank";
+}
+function applyTemplate(date, key) {
+  mutDay(date, d => {
+    const w = d.workout, kept = w.exercises.filter(e => e.sets.some(filled)), have = new Set(kept.map(e => keyOf(e.n)));
+    w.tpl = key;
+    if (key === "rest") { w.name = "Rest"; w.exercises = kept; w.rest = !kept.length; if (!kept.length && w.status === "done") w.status = "open"; return; }
+    if (key === "blank") { w.name = "Session"; w.rest = false; w.exercises = kept; return; }
+    const sp = profile.split[key]; if (!sp) return;
+    const add = (sp.ex || []).filter(e => e.n && !have.has(keyOf(e.n))).map(e => ({ n: e.n, ts: e.s, tr: e.r, sets: Array.from({ length: Math.max(1, e.s | 0) }, () => ({ w: "", r: "", d: false })) }));
+    w.exercises = kept.concat(add);
+    w.rest = !w.exercises.length;
+    w.name = w.rest ? "Rest" : (sp.rest && sp.name === "Rest" ? "Session" : sp.name);
+  });
+}
 function mutDay(date, fn, rerender = true) {
   if (!days[date]) days[date] = blankDay(date);
   fn(days[date]);
@@ -172,7 +195,7 @@ function render() {
   $("#datelabel").replaceChildren(
     h("span", { text: cur === t ? "Today" : WDL[d.getDay()] }),
     h("small", { text: `${WDL[d.getDay()]}, ${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}` }),
-    h("input", { type: "date", class: "datejump", "aria-label": "Jump to a date", value: cur, max: t,
+    h("input", { type: "date", class: "datejump", "aria-label": "Jump to a date", value: cur,
       onclick: e => { try { e.target.showPicker && e.target.showPicker(); } catch {} },
       onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) { cur = e.target.value; render(); } } })
   );
@@ -194,6 +217,11 @@ function viewTrain() {
     h("div", { class: "dayhead" },
       h("div", {}, h("div", { class: "label", text: WDL[parse(cur).getDay()] + " session" }), h("h2", { text: w.rest && !w.exercises.length ? "Rest" : (w.name || "Session") })),
       status),
+    h("div", { class: "row", style: "margin-top:10px" },
+      h("span", { class: "label", text: "Session" }),
+      h("select", { id: "tplsel-" + cur, "aria-label": "Session for this day", style: "width:auto;flex:1;max-width:280px", onchange: e => applyTemplate(cur, e.target.value) },
+        sessionOptions().map(([v, l]) => h("option", { value: v, text: l, selected: v === currentTplKey(day) })))),
+    h("div", { class: "muted", style: "font-size:12px;margin-top:4px", text: "Switch to any session or a rest day. Sets you've already logged are kept." }),
     w.exercises.length ? h("div", { class: "statline" },
       h("div", { class: "stat" }, h("div", { class: "label", text: "Sets logged" }), h("div", { class: "v", text: st.sets + " / " + w.exercises.reduce((a, e) => a + e.sets.length, 0) })),
       h("div", { class: "stat" }, h("div", { class: "label", text: "Volume" }), h("div", { class: "v", text: fmt(st.vol) + " " + unit })),
@@ -206,7 +234,7 @@ function viewTrain() {
   const out = [head];
   if (w.rest && !w.exercises.length) {
     out.push(h("section", {}, h("div", { class: "card stack" },
-      h("div", { class: "sub", text: "Recovery is part of the program. Log bodyweight and food, or add work if you're training anyway." }),
+      h("div", { class: "sub", text: "Rest day. To train anyway, pick a session above or add exercises below." }),
       h("div", { class: "row" },
         h("span", { class: "label", text: "Bodyweight" }),
         h("input", { id: "bw-" + cur, type: "text", inputmode: "decimal", placeholder: unit, value: day.bw || "", style: "width:100px;font-family:var(--mono)",
@@ -359,18 +387,23 @@ function writeSets(d, name, w, r, sets, mode, plan) {
   while (left-- > 0) ex.sets.push({ w: String(w), r: String(r), d: true });
 }
 function bulkRowsFor(date, tpl) {
-  const sp = profile.split[tpl] || { ex: [] };
-  return (sp.ex || []).map(e => {
+  const sp = (tpl !== "blank" && profile.split[tpl]) || { ex: [] };
+  const planned = (sp.ex || []).filter(e => e.n);
+  const plannedKeys = new Set(planned.map(e => keyOf(e.n)));
+  // anything already logged that day but not in this template shows up too
+  const extra = (getDay(date).workout?.exercises || []).filter(x => x.sets.some(filled) && !plannedKeys.has(keyOf(x.n))).map(x => ({ n: x.n, s: x.ts || x.sets.length, r: x.tr || 8 }));
+  const rows = planned.concat(extra).map(e => {
     const logged = (getDay(date).workout?.exercises || []).find(x => keyOf(x.n) === keyOf(e.n));
     const done = logged ? logged.sets.filter(filled) : [];
     return done.length
       ? { n: e.n, w: String(done[0].w), r: String(done[0].r), s: String(done.length), ps: e.s, pr: e.r }
       : { n: e.n, w: "", r: String(e.r || ""), s: String(e.s || 3), ps: e.s, pr: e.r };
   });
+  return rows.length ? rows : [{ n: "", w: "", r: "8", s: "3" }];
 }
 function bulkCard(B) {
   const wd = String(parse(B.date).getDay());
-  if (B.tpl == null || !profile.split[B.tpl]) B.tpl = profile.split[wd] && !profile.split[wd].rest ? wd : (Object.keys(profile.split).find(k => !profile.split[k].rest) || wd);
+  if (B.tpl == null || (B.tpl !== "blank" && !profile.split[B.tpl])) B.tpl = days[B.date] && days[B.date].workout?.tpl && (days[B.date].workout.tpl === "blank" || profile.split[days[B.date].workout.tpl]) ? days[B.date].workout.tpl : wd;
   const key = B.date + "|" + B.tpl;
   if (B.rowsKey !== key) { B.rows = bulkRowsFor(B.date, B.tpl); B.rowsKey = key; }
   const order = ["1", "2", "3", "4", "5", "6", "0"];
@@ -381,14 +414,15 @@ function bulkCard(B) {
     const rows = B.rows.map(r => ({ n: r.n.trim().slice(0, 60), w: r.w, r: Math.round(n0(r.r)), s: Math.min(12, Math.max(1, Math.round(n0(r.s) || 1))), ps: r.ps, pr: r.pr }))
       .filter(r => r.n && r.w !== "" && r.r > 0);
     if (!rows.length) { B.msg = "Enter a weight and reps for at least one exercise. Use 0 for bodyweight moves."; render(); return; }
-    const tplName = profile.split[B.tpl]?.name || "Session";
+    const sp = B.tpl !== "blank" ? profile.split[B.tpl] : null;
+    const tplName = sp && !(sp.rest && sp.name === "Rest") ? sp.name : (getDay(B.date).workout?.rest ? "Session" : (getDay(B.date).workout?.name || "Session"));
     mutDay(B.date, d => {
-      d.workout.name = tplName;
+      d.workout.name = tplName; d.workout.tpl = B.tpl;
       for (const r of rows) writeSets(d, r.n, n0(r.w), r.r, r.s, "replace", r.ps ? { s: r.ps, r: r.pr } : null);
       d.workout.status = "done";
     }, false);
     const nSets = rows.reduce((a, r) => a + r.s, 0), skipped = B.rows.length - rows.length;
-    B.msg = `Saved ${tplName} for ${nice(B.date)}: ${rows.length} exercise${rows.length === 1 ? "" : "s"}, ${nSets} sets.${skipped ? ` ${skipped} left blank and skipped.` : ""} Session counts as done.`;
+    B.msg = `Saved ${tplName === "Session" ? "session" : tplName} for ${nice(B.date)}: ${rows.length} exercise${rows.length === 1 ? "" : "s"}, ${nSets} set${nSets === 1 ? "" : "s"}.${skipped ? ` ${skipped} left blank and skipped.` : ""} Session counts as done.`;
     B.rowsKey = ""; render();
   };
 
@@ -396,7 +430,7 @@ function bulkCard(B) {
     h("div", { class: "spread" },
       h("div", { class: "label", text: "Whole day" }),
       h("select", { id: "bk-tpl", "aria-label": "Split day", style: "width:auto", onchange: e => { B.tpl = e.target.value; B.msg = ""; render(); } },
-        order.filter(k => profile.split[k] && !profile.split[k].rest).map(k => h("option", { value: k, text: `${profile.split[k].name} (${WD[+k]})`, selected: k === B.tpl })))),
+        order.filter(k => profile.split[k]).map(k => h("option", { value: k, text: `${profile.split[k].name} (${WD[+k]})`, selected: k === B.tpl })).concat([h("option", { value: "blank", text: "Blank session", selected: B.tpl === "blank" })]))),
     B.rows.length ? h("div", { class: "bulk" },
       h("span", { class: "label", text: profile.unit }), h("span", { class: "label", text: "Reps" }), h("span", { class: "label", text: "Sets" }), h("span"),
       B.rows.flatMap((r, i) => {
@@ -407,7 +441,7 @@ function bulkCard(B) {
           cell(i, "r", "numeric", "", `${r.n} reps`),
           cell(i, "s", "numeric", "", `${r.n} sets`),
           h("button", { class: "x", "aria-label": "Remove " + r.n, text: "×", onclick: () => { B.rows.splice(i, 1); render(); } })];
-      })) : h("div", { class: "muted", text: "No exercises in this split day. Add them below or in the Plan tab." }),
+      })) : h("div", { class: "muted", text: "No exercises yet. Tap + Exercise to add them." }),
     h("div", { class: "row" },
       h("button", { class: "btn small ghost", text: "+ Exercise", onclick: () => { B.rows.push({ n: "", w: "", r: "8", s: "3" }); render(); setTimeout(() => document.getElementById(`bk-${B.rows.length - 1}-n`)?.focus(), 0); } }),
       h("button", { class: "btn primary", style: "margin-left:auto", text: "Save whole day", onclick: save })),
@@ -441,7 +475,7 @@ function backfillCard() {
     h("div", { class: "card stack" },
       h("div", { class: "row" },
         h("label", { class: "fieldl", style: "flex:1;min-width:150px" }, h("span", { text: "Date" }),
-          h("input", { id: "bf-date", type: "date", value: B.date, max: t, onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) { B.date = e.target.value; B.msg = ""; B.tpl = null; B.rowsKey = ""; render(); } } })),
+          h("input", { id: "bf-date", type: "date", value: B.date, onchange: e => { if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) { B.date = e.target.value; B.msg = ""; B.tpl = null; B.rowsKey = ""; render(); } } })),
         h("div", { class: "sub", style: "font-size:13px;align-self:flex-end;padding-bottom:6px", text: `${WDL[parse(B.date).getDay()]} · ${dd.workout?.rest && !dd.workout.exercises.length ? "rest day" : (dd.workout?.name || "session")}${st && st !== "open" ? " · " + st : ""}${dd.bw ? ` · ${dd.bw} ${profile.unit}` : ""}` })),
 
       h("div", { class: "label", text: "Bodyweight" }),
@@ -632,8 +666,8 @@ function viewPlan() {
       h("div", { class: "row" },
         h("span", { class: "label", style: "width:34px", text: WD[i] }),
         h("input", { id: `sp-n-${i}`, type: "text", value: sd.name, style: "flex:1;min-width:120px;font-weight:600", oninput: e => pset(p => p.split[i].name = e.target.value.slice(0, 30)) }),
-        h("label", { class: "row", style: "gap:6px" }, h("input", { id: `sp-r-${i}`, type: "checkbox", checked: sd.rest, onchange: e => { pset(p => p.split[i].rest = e.target.checked); render(); } }), h("span", { class: "sub", text: "Rest" }))),
-      sd.rest ? null : h("div", {},
+        h("label", { class: "row", style: "gap:6px" }, h("input", { id: `sp-r-${i}`, type: "checkbox", checked: sd.rest, onchange: e => { pset(p => p.split[i].rest = e.target.checked); render(); } }), h("span", { class: "sub", text: "Rest by default" }))),
+      h("div", {},
         h("div", { class: "exrow", style: "margin-top:8px" }, h("span", { class: "label", text: "Exercise" }), h("span", { class: "label", text: "Sets" }), h("span", { class: "label", text: "Reps" }), h("span")),
         sd.ex.map((e, j) => h("div", { class: "exrow" },
           h("input", { id: `sp-${i}-${j}-n`, type: "text", value: e.n, list: "exlist2", oninput: ev => pset(p => p.split[i].ex[j].n = ev.target.value.slice(0, 60)) }),
